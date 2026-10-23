@@ -1,259 +1,516 @@
 package com.studyflow.app
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private const val PREFS = "studyflow_data"
+
+data class ClassEntry(
+    val subject: String,
+    val date: String,
+    val missed: Boolean
+)
+
+data class TimetableEntry(
+    val day: String,
+    val time: String,
+    val subject: String,
+    val room: String
+)
+
+data class StudyTask(
+    val title: String,
+    val deadline: String,
+    val done: Boolean
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             MaterialTheme {
-                StudyFlowApp(applicationContext)
+                StudyFlowApp()
             }
         }
     }
 }
 
 @Composable
-fun StudyFlowApp(context: Context) {
+fun StudyFlowApp() {
+    val context = LocalContext.current
     val prefs = remember {
-        context.getSharedPreferences("studyflow_data", Context.MODE_PRIVATE)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
     var tab by remember { mutableStateOf("Home") }
 
     var subjects by remember {
         mutableStateOf(
-            prefs.getString("subjects", "Anatomy,Physiology,Biochemistry")
-                ?.split(",") ?: listOf("Anatomy", "Physiology", "Biochemistry")
+            prefs.getString("subjects", "Anatomy,Physiology,Biochemistry,Histology")
+                .orEmpty()
+                .split(",")
+                .filter { it.isNotBlank() }
         )
     }
 
-    var tasks by remember {
-        mutableStateOf(
-            prefs.getString("tasks", "")
-                ?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()
-        )
+    var attendance by remember {
+        mutableStateOf(loadAttendance(prefs))
     }
 
     var timetable by remember {
-        mutableStateOf(
-            prefs.getString("timetable", "")
-                ?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()
-        )
+        mutableStateOf(loadTimetable(prefs))
     }
 
-    var missed by remember {
-        mutableStateOf(
-            prefs.getString("missed", "")
-                ?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()
-        )
+    var tasks by remember {
+        mutableStateOf(loadTasks(prefs))
     }
 
-    var subjectInput by remember { mutableStateOf("") }
-    var taskInput by remember { mutableStateOf("") }
-    var classInput by remember { mutableStateOf("") }
-    var selectedSubject by remember { mutableStateOf("Anatomy") }
+    var newSubject by remember { mutableStateOf("") }
+    var newTask by remember { mutableStateOf("") }
+    var taskDeadline by remember { mutableStateOf("") }
 
-    fun save(key: String, values: List<String>) {
-        prefs.edit().putString(key, values.joinToString("\n")).apply()
+    var newDay by remember { mutableStateOf("Monday") }
+    var newTime by remember { mutableStateOf("09:00") }
+    var newClassSubject by remember { mutableStateOf("") }
+    var newRoom by remember { mutableStateOf("") }
+
+    val today = remember {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    }
+
+    fun saveSubjects() {
+        prefs.edit().putString("subjects", subjects.joinToString(",")).apply()
+    }
+
+    fun saveAttendance() {
+        val array = JSONArray()
+        attendance.forEach {
+            array.put(
+                JSONObject().apply {
+                    put("subject", it.subject)
+                    put("date", it.date)
+                    put("missed", it.missed)
+                }
+            )
+        }
+        prefs.edit().putString("attendance", array.toString()).apply()
+    }
+
+    fun saveTimetable() {
+        val array = JSONArray()
+        timetable.forEach {
+            array.put(
+                JSONObject().apply {
+                    put("day", it.day)
+                    put("time", it.time)
+                    put("subject", it.subject)
+                    put("room", it.room)
+                }
+            )
+        }
+        prefs.edit().putString("timetable", array.toString()).apply()
+    }
+
+    fun saveTasks() {
+        val array = JSONArray()
+        tasks.forEach {
+            array.put(
+                JSONObject().apply {
+                    put("title", it.title)
+                    put("deadline", it.deadline)
+                    put("done", it.done)
+                }
+            )
+        }
+        prefs.edit().putString("tasks", array.toString()).apply()
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("STUDYFLOW") })
-        },
         bottomBar = {
             NavigationBar {
-                listOf("Home", "Attendance", "Timetable", "Tasks").forEach { name ->
+                listOf("Home", "Attendance", "Timetable", "Tasks").forEach { item ->
                     NavigationBarItem(
-                        selected = tab == name,
-                        onClick = { tab = name },
-                        icon = { Text(
-                            when (name) {
-                                "Home" -> "⌂"
-                                "Attendance" -> "%"
-                                "Timetable" -> "▦"
-                                else -> "✓"
-                            }
-                        ) },
-                        label = { Text(name) }
+                        selected = tab == item,
+                        onClick = { tab = item },
+                        icon = {},
+                        label = { Text(item) }
                     )
                 }
             }
         }
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                Text(
+                    "STUDYFLOW",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
             when (tab) {
                 "Home" -> {
-                    Text("Welcome to StudyFlow", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Your study day, organised.")
-                    Spacer(Modifier.height(20.dp))
-                    Text("Subjects: ${subjects.size}")
-                    Text("Pending tasks: ${tasks.size}")
-                    Text("Missed classes recorded: ${missed.size}")
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = { tab = "Attendance" }) {
-                        Text("Open Attendance")
+                    item {
+                        Text(
+                            "Your study day, organised.",
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
-                    Button(onClick = { tab = "Timetable" }) {
-                        Text("Open Timetable")
+
+                    item {
+                        InfoCard(
+                            "Attendance",
+                            "Subjects: ${subjects.size}\nMissed classes: ${attendance.count { it.missed }}"
+                        )
                     }
-                    Button(onClick = { tab = "Tasks" }) {
-                        Text("Open Tasks")
+
+                    item {
+                        InfoCard(
+                            "Timetable",
+                            "${timetable.size} scheduled classes"
+                        )
+                    }
+
+                    item {
+                        InfoCard(
+                            "Tasks",
+                            "${tasks.count { !it.done }} tasks remaining\n${tasks.count { it.done }} completed"
+                        )
+                    }
+
+                    item {
+                        Button(
+                            onClick = { tab = "Attendance" },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Manage Attendance")
+                        }
+                    }
+
+                    item {
+                        OutlinedButton(
+                            onClick = { tab = "Timetable" },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Open Timetable")
+                        }
+                    }
+
+                    item {
+                        OutlinedButton(
+                            onClick = { tab = "Tasks" },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Open Tasks & Assignments")
+                        }
                     }
                 }
 
                 "Attendance" -> {
-                    Text("Attendance Tracker", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Add subjects, then record missed classes.")
-                    Spacer(Modifier.height(12.dp))
-
-                    Row {
-                        OutlinedTextField(
-                            value = subjectInput,
-                            onValueChange = { subjectInput = it },
-                            label = { Text("New subject") },
-                            modifier = Modifier.weight(1f)
+                    item {
+                        Text(
+                            "Attendance Management",
+                            style = MaterialTheme.typography.titleLarge
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = {
-                            val s = subjectInput.trim()
-                            if (s.isNotEmpty() && s !in subjects) {
-                                subjects = subjects + s
-                                save("subjects", subjects)
-                                subjectInput = ""
-                            }
-                        }) { Text("Add") }
+                        Text("Date: $today")
+                        Text(
+                            "Mark only the classes you MISSED. " +
+                                "Unmarked classes are not counted as attended."
+                        )
                     }
 
-                    Spacer(Modifier.height(12.dp))
-                    Text("Record a missed class:")
-                    subjects.forEach { subject ->
-                        Row(
+                    item {
+                        OutlinedTextField(
+                            value = newSubject,
+                            onValueChange = { newSubject = it },
+                            label = { Text("Add a subject") },
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            singleLine = true
+                        )
+
+                        Button(
+                            onClick = {
+                                val name = newSubject.trim()
+                                if (name.isNotEmpty() &&
+                                    !subjects.any { it.equals(name, true) }
+                                ) {
+                                    subjects = subjects + name
+                                    saveSubjects()
+                                    newSubject = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(subject, modifier = Modifier.weight(1f))
-                            Button(onClick = {
-                                val entry = "$subject|${System.currentTimeMillis()}"
-                                missed = missed + entry
-                                save("missed", missed)
-                            }) { Text("Missed") }
+                            Text("Add Subject")
                         }
                     }
 
-                    Spacer(Modifier.height(12.dp))
-                    Text("Missed classes: ${missed.size}")
-                    LazyColumn {
-                        items(missed.reversed()) { entry ->
-                            Text(
-                                entry.substringBefore("|") +
-                                    " — " + entry.substringAfter("|", ""),
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
+                    items(subjects, key = { it }) { subject ->
+                        val missedToday = attendance.any {
+                            it.subject == subject && it.date == today && it.missed
+                        }
+
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    subject,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+
+                                val total = attendance.count {
+                                    it.subject == subject
+                                }
+                                val missed = attendance.count {
+                                    it.subject == subject && it.missed
+                                }
+                                val attended = total - missed
+                                val percent = if (total > 0) {
+                                    attended * 100 / total
+                                } else {
+                                    0
+                                }
+
+                                Text("Recorded classes: $total")
+                                Text("Missed: $missed")
+                                Text("Attendance: $percent%")
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Missed today")
+                                    Checkbox(
+                                        checked = missedToday,
+                                        onCheckedChange = { checked ->
+                                            attendance = attendance.filterNot {
+                                                it.subject == subject &&
+                                                    it.date == today
+                                            }
+
+                                            if (checked) {
+                                                attendance = attendance +
+                                                    ClassEntry(subject, today, true)
+                                            }
+
+                                            saveAttendance()
+                                        }
+                                    )
+                                }
+
+                                TextButton(
+                                    onClick = {
+                                        subjects = subjects.filterNot { it == subject }
+                                        saveSubjects()
+                                    }
+                                ) {
+                                    Text("Remove subject")
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            "Attendance history",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+
+                    if (attendance.isEmpty()) {
+                        item { Text("No attendance records yet.") }
+                    } else {
+                        items(
+                            attendance.sortedByDescending { it.date },
+                            key = { "${it.subject}_${it.date}" }
+                        ) { record ->
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(record.subject)
+                                        Text(record.date)
+                                    }
+                                    Text(if (record.missed) "Missed" else "Attended")
+                                }
+                            }
                         }
                     }
                 }
 
                 "Timetable" -> {
-                    Text("Weekly Timetable", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = classInput,
-                        onValueChange = { classInput = it },
-                        label = { Text("Day | Time | Subject") },
-                        placeholder = { Text("Monday | 09:00 | Anatomy") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(onClick = {
-                        if (classInput.isNotBlank()) {
-                            timetable = timetable + classInput.trim()
-                            save("timetable", timetable)
-                            classInput = ""
-                        }
-                    }) { Text("Add Class") }
+                    item {
+                        Text(
+                            "Weekly Timetable",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
 
-                    LazyColumn {
-                        items(timetable) { item ->
-                            Card(
+                    item {
+                        var dayExpanded by remember { mutableStateOf(false) }
+
+                        ExposedDropdownMenuBox(
+                            expanded = dayExpanded,
+                            onExpandedChange = { dayExpanded = it }
+                        ) {
+                            OutlinedTextField(
+                                value = newDay,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Day") },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = dayExpanded
+                                    )
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
+                                    .menuAnchor()
+                            )
+
+                            ExposedDropdownMenu(
+                                expanded = dayExpanded,
+                                onDismissRequest = { dayExpanded = false }
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(item, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = {
-                                        timetable = timetable - item
-                                        save("timetable", timetable)
-                                    }) { Text("Delete") }
+                                listOf(
+                                    "Monday", "Tuesday", "Wednesday",
+                                    "Thursday", "Friday", "Saturday", "Sunday"
+                                ).forEach { day ->
+                                    DropdownMenuItem(
+                                        text = { Text(day) },
+                                        onClick = {
+                                            newDay = day
+                                            dayExpanded = false
+                                        }
+                                    )
                                 }
                             }
                         }
-                    }
-                }
 
-                "Tasks" -> {
-                    Text("Tasks & Assignments", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = taskInput,
-                        onValueChange = { taskInput = it },
-                        label = { Text("Assignment or task") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(onClick = {
-                        if (taskInput.isNotBlank()) {
-                            tasks = tasks + taskInput.trim()
-                            save("tasks", tasks)
-                            taskInput = ""
-                        }
-                    }) { Text("Add Task") }
+                        OutlinedTextField(
+                            value = newTime,
+                            onValueChange = { newTime = it },
+                            label = { Text("Time (e.g. 09:00)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
 
-                    LazyColumn {
-                        items(tasks) { task ->
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                        OutlinedTextField(
+                            value = newClassSubject,
+                            onValueChange = { newClassSubject = it },
+                            label = { Text("Subject / Class") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = newRoom,
+                            onValueChange = { newRoom = it },
+                            label = { Text("Room (optional)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        Button(
+                            onClick = {
+                                if (newClassSubject.isNotBlank() &&
+                                    newTime.isNotBlank()
                                 ) {
-                                    Text(task, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = {
-                                        tasks = tasks - task
-                                        save("tasks", tasks)
-                                    }) { Text("Done") }
+                                    timetable = timetable + TimetableEntry(
+                                        newDay,
+                                        newTime.trim(),
+                                        newClassSubject.trim(),
+                                        newRoom.trim()
+                                    )
+                                    saveTimetable()
+                                    newClassSubject = ""
+                                    newRoom = ""
                                 }
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Add Class")
                         }
                     }
-                }
-            }
-        }
-    }
-}
+
+                    if (timetable.isEmpty()) {
+                        item { Text("Your timetable is empty. Add your classes above.") }
+                    } else {
+                        val days = listOf(
+                            "Monday", "Tuesday", "Wednesday",
+                            "Thursday", "Friday", "Saturday", "Sunday"
+                        )
+
+                        days.forEach { day ->
+                            val entries = timetable
+                                .filter { it.day == day }
+                                .sortedBy { it.time }
+
+                            if (entries.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        day,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                items(
+                                    entries,
+                                    key = {
+                                        "${it.day}_${it.time}_${it.subject}_${it.room}"
+                                    }
+                                ) { entry ->
+                                    Card(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    entry.subject,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text("${entry.time} • ${entry.room}")
+                                            }
+
+                                            TextButton(
+                                                onClick = {
+                                                    timetable = timetable.filterNot {
+                                                        it == entry
+                                            
