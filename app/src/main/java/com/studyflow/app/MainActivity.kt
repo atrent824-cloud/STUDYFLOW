@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun StudyFlowApp() {
     var selectedTab by remember { mutableStateOf("Home") }
 
